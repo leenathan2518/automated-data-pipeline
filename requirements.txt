@@ -1,0 +1,9 @@
+# pip install -r requirements.txt
+pandas
+yfinance
+fredapi
+requests
+python-dotenv
+sqlalchemy
+psycopg2-binary
+akshare

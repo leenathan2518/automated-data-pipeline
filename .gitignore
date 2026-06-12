@@ -1,24 +1,19 @@
-# Virtual environment
 .venv/
-
-# Python cache
+venv/
 __pycache__/
 *.pyc
-
-# IDE
+.env
 .idea/
 .vscode/
 
-# Environment variables
-.env
-
-# Data files
-data/raw/*.csv
-data/processed/*.csv
-
-# Logs
 logs/*.log
 
-# OS files
-.DS_Store
-Thumbs.db
+data/raw/*
+data/processed/*
+
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# 线上 Dashboard 必须保留快照
+!dashboard/snapshots/
+!dashboard/snapshots/*.csv

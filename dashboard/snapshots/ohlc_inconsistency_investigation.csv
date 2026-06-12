@@ -1,0 +1,8 @@
+date,symbol,asset_name,asset_type,open,high,low,close,provider
+2025-02-24,YM=F,Dow Jones Futures,futures,43589.0,43596.0,43567.0,43535.0,yfinance
+2025-02-25,YM=F,Dow Jones Futures,futures,43735.0,43784.0,43727.0,43690.0,yfinance
+2025-02-26,YM=F,Dow Jones Futures,futures,43484.0,43485.0,43447.0,43506.0,yfinance
+2025-03-03,YM=F,Dow Jones Futures,futures,43356.0,43356.0,43309.0,43247.0,yfinance
+2025-03-18,YM=F,Dow Jones Futures,futures,41593.0,41597.0,41590.0,41600.0,yfinance
+2025-03-19,YM=F,Dow Jones Futures,futures,42001.0,42001.0,42001.0,41995.0,yfinance
+2026-06-12,YM=F,Dow Jones Futures,futures,50910.0,51723.0,51212.0,51501.0,yfinance

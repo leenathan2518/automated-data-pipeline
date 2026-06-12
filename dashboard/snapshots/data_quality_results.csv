@@ -1,0 +1,11 @@
+id,table_name,check_name,check_result,failed_rows,details,check_time
+55,openbb_market_data,expected_symbols_check,PASS,0,Missing symbols: None. Unexpected symbols: None.,2026-06-12 21:02:22.531830
+54,openbb_market_data,return_sanity_check,PASS,0,Return values with absolute magnitude above 1.0: 0,2026-06-12 21:02:22.531830
+53,openbb_market_data,ohlc_consistency_check,WARNING,7,"Rows with inconsistent OHLC values: 7. These may reflect incomplete current-day data, futures contract roll adjustments, settlement-price differences, or provider revisions.",2026-06-12 21:02:22.531830
+52,openbb_market_data,negative_values_check,PASS,0,"Negative values in ['open', 'high', 'low', 'close', 'volume']: 0. Missing optional columns: []",2026-06-12 21:02:22.526833
+51,openbb_market_data,date_freshness_check,PASS,0,"Latest date: 2026-06-12, Days old: 0, Warning threshold: 7",2026-06-12 21:02:22.526833
+50,openbb_market_data,duplicate_rows_check,PASS,0,"Duplicate rows based on ['date', 'symbol']: 0",2026-06-12 21:02:22.526833
+49,openbb_market_data,missing_values_check,PASS,0,"Missing values in checked columns ['date', 'symbol', 'asset_name', 'asset_type', 'close', 'provider', 'extracted_at', 'transformed_at']: 0",2026-06-12 21:02:22.521835
+48,macro_indicators,date_freshness_check,PASS,0,"Latest date: 2026-05-01, Days old: 42, Warning threshold: 120",2026-06-12 21:02:22.521835
+47,macro_indicators,duplicate_rows_check,PASS,0,"Duplicate rows based on ['date', 'country', 'indicator_code']: 0",2026-06-12 21:02:22.521835
+46,macro_indicators,missing_values_check,WARNING,2,"Missing values in checked columns ['date', 'country', 'indicator_code', 'value']: 2",2026-06-12 21:02:22.521835

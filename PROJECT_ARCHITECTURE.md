@@ -2,42 +2,47 @@
 
 ## System Overview
 
-The Automated Data Pipeline follows a layered ETL architecture.
+The Automated Data Pipeline follows a modular layered ETL architecture.
 
 ```text
-External Data Sources
+External Sources
+│
+├── FRED
+├── OpenBB
+│   └── yfinance provider
+└── Sina Finance
         │
         ▼
-┌─────────────────────┐
-│   Extract Layer     │
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│  Transform Layer    │
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│ Data Quality Layer  │
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│    Load Layer       │
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│    PostgreSQL       │
-└─────────────────────┘
+┌──────────────────────────┐
+│      Extract Layer       │
+└────────────┬─────────────┘
+             ▼
+┌──────────────────────────┐
+│     Transform Layer      │
+└────────────┬─────────────┘
+             ▼
+┌──────────────────────────┐
+│    Data Quality Layer    │
+└────────────┬─────────────┘
+             ▼
+┌──────────────────────────┐
+│        Load Layer        │
+└────────────┬─────────────┘
+             ▼
+┌──────────────────────────┐
+│       PostgreSQL         │
+└────────────┬─────────────┘
+             ▼
+┌──────────────────────────┐
+│ Logging and Monitoring   │
+└──────────────────────────┘
 ```
 
 ---
 
-# Extract Layer
+# 1. Extract Layer
 
-The extract layer retrieves raw data from external providers.
+The extract layer retrieves raw data from external providers and stores it in CSV format.
 
 ## FRED Extract
 
@@ -47,13 +52,13 @@ File:
 src/extract/fred_extract.py
 ```
 
-Data:
+Current series:
 
-* UNRATE
-* CPIAUCSL
-* FEDFUNDS
+- `UNRATE`
+- `CPIAUCSL`
+- `FEDFUNDS`
 
-Output:
+Outputs:
 
 ```text
 data/raw/fred_UNRATE.csv
@@ -61,60 +66,52 @@ data/raw/fred_CPIAUCSL.csv
 data/raw/fred_FEDFUNDS.csv
 ```
 
----
-
-## Market Extract
+## OpenBB Market Extract
 
 File:
 
 ```text
-src/extract/market_extract.py
+src/extract/openbb_market_extract.py
 ```
 
-Data:
+OpenBB is used as a unified market-data interface. The current provider is `yfinance`.
 
-* SPY
-* QQQ
-* GLD
-* CL=F
-* DX-Y.NYB
-* ^TNX
-* ^TYX
-* YM=F
-* ES=F
+Index route instruments:
+
+- `^GSPC`
+- `^DJI`
+- `^IXIC`
+- `^TNX`
+- `^TYX`
+- `DX-Y.NYB`
+
+Futures route instruments:
+
+- `ES=F`
+- `YM=F`
 
 Output:
 
 ```text
-data/raw/market_*.csv
+data/raw/openbb_market_data.csv
 ```
 
----
+The extractor:
 
-## China Stock Extract
+- Uses separate OpenBB index and futures endpoints
+- Preserves provider metadata
+- Standardises output columns
+- Continues processing when one symbol fails
+- Applies a delay between requests
+- Reports successful and failed symbols
+
+## Sina China Stock Extract
 
 File:
 
 ```text
 src/extract/sina_stock_extract.py
 ```
-
-Data:
-
-A-share:
-
-* Ping An Bank
-* China Merchants Bank
-* Kweichow Moutai
-* CATL
-* BYD
-* SMIC
-
-Hong Kong Share:
-
-* Tencent
-* Alibaba
-* Meituan
 
 Output:
 
@@ -124,9 +121,9 @@ data/raw/sina_stock_quotes_raw.csv
 
 ---
 
-# Transform Layer
+# 2. Transform Layer
 
-The transform layer standardizes raw data before loading.
+The transform layer standardises raw data and calculates derived variables.
 
 ## Macro Transform
 
@@ -136,41 +133,54 @@ File:
 src/transform/macro_transform.py
 ```
 
-Functions:
+Responsibilities:
 
-* Datetime conversion
-* Column standardisation
-* Missing value handling
+- Combine FRED series
+- Convert dates
+- Standardise metadata
+- Prepare values for database loading
 
 Output:
 
 ```text
-data/processed/
+data/processed/macro_indicators_processed.csv
 ```
 
----
-
-## Market Transform
+## OpenBB Market Transform
 
 File:
 
 ```text
-src/transform/market_transform.py
+src/transform/transform_openbb_market.py
 ```
 
-Functions:
+Responsibilities:
 
-* Date conversion
-* Numeric conversion
-* Data cleaning
+- Validate the expected raw schema
+- Convert dates and numeric fields
+- Standardise text fields
+- Remove unusable rows
+- Remove duplicate symbol/date observations
+- Preserve provider and extraction metadata
+- Calculate financial features
+- Add transformation timestamps
+
+Derived fields:
+
+```text
+daily_return
+log_return
+intraday_return
+daily_range_pct
+ohlc_valid
+transformed_at
+```
 
 Output:
 
 ```text
-data/processed/
+data/processed/openbb_market_data_clean.csv
 ```
-
----
 
 ## China Stock Transform
 
@@ -180,14 +190,14 @@ File:
 src/transform/china_stock_transform.py
 ```
 
-Functions:
+Responsibilities:
 
-* Preserve leading-zero stock symbols
-* Parse A-share timestamps
-* Parse Hong Kong timestamps
-* Handle missing values
-* Calculate bid/ask metrics
-* Standardize data types
+- Preserve leading-zero symbols
+- Parse A-share and Hong Kong timestamps
+- Standardise numeric fields
+- Handle missing values
+- Calculate bid/ask metrics
+- Prepare quote snapshots for PostgreSQL
 
 Output:
 
@@ -197,7 +207,7 @@ data/processed/china_stock_quotes_clean.csv
 
 ---
 
-# Data Quality Layer
+# 3. Data Quality Layer
 
 File:
 
@@ -205,24 +215,39 @@ File:
 src/quality/data_checks.py
 ```
 
-Checks:
+## Macro Checks
 
-* Row count validation
-* Missing value checks
-* Duplicate checks
-* Data freshness validation
+- Required-field missing values
+- Duplicate natural keys
+- Date freshness
 
-Output:
+## OpenBB Market Checks
+
+- Required-field missing values
+- Duplicate `date + symbol` keys
+- Date freshness
+- Negative OHLCV values
+- Full OHLC consistency
+- Extreme return detection
+- Expected symbol coverage
+
+## Warning Investigation
+
+Rows with inconsistent OHLC relationships are retained and exported for manual review:
 
 ```text
-data_quality_results
+data/processed/ohlc_inconsistency_investigation.csv
+```
+
+Quality output:
+
+```text
+data/processed/data_quality_results.csv
 ```
 
 ---
 
-# Load Layer
-
-The load layer inserts cleaned data into PostgreSQL.
+# 4. Load Layer
 
 ## Macro Loader
 
@@ -232,29 +257,42 @@ File:
 src/load/load_macro_to_postgres.py
 ```
 
-Target Table:
+Target:
 
 ```sql
 macro_indicators
 ```
 
----
-
-## Market Loader
+## OpenBB Market Loader
 
 File:
 
 ```text
-src/load/load_market_to_postgres.py
+src/load/load_openbb_market_to_postgres.py
 ```
 
-Target Table:
+Target:
 
 ```sql
-market_prices
+openbb_market_data
 ```
 
----
+Natural key:
+
+```sql
+UNIQUE (symbol, date)
+```
+
+Features:
+
+- Automatic table creation
+- Index creation
+- Batch UPSERT
+- Provider metadata retention
+- Post-load verification
+- Duplicate-group validation
+- Date-range validation
+- Symbol-level row summaries
 
 ## China Stock Loader
 
@@ -264,19 +302,11 @@ File:
 src/load/load_china_stock_to_postgres.py
 ```
 
-Target Table:
+Target:
 
 ```sql
 stock_quotes
 ```
-
-Features:
-
-* UPSERT support
-* Duplicate prevention
-* NULL handling
-
----
 
 ## Data Quality Loader
 
@@ -286,15 +316,17 @@ File:
 src/load/load_quality_to_postgres.py
 ```
 
-Target Table:
+Target:
 
 ```sql
 data_quality_results
 ```
 
+The quality-results table uses append-only loading.
+
 ---
 
-# Orchestration Layer
+# 5. Orchestration Layer
 
 File:
 
@@ -302,69 +334,130 @@ File:
 main.py
 ```
 
-Pipeline Execution Order:
+Current execution order:
 
 ```text
-1. Extract FRED data
-2. Extract market data
-3. Extract China stock data
+1. Extract FRED macroeconomic data
+2. Extract financial market data through OpenBB
+3. Extract Sina China stock quote data
 
-4. Transform macro data
-5. Transform market data
-6. Transform stock data
+4. Transform macroeconomic data
+5. Transform OpenBB financial market data
+6. Transform China stock quote data
 
-7. Run quality checks
+7. Run data quality checks
 
-8. Load macro data
-9. Load market data
-10. Load stock data
-11. Load quality results
+8. Load macroeconomic data into PostgreSQL
+9. Load OpenBB financial market data into PostgreSQL
+10. Load China stock quote data into PostgreSQL
+11. Load quality results into PostgreSQL
 ```
+
+The orchestrator stops on an unhandled step failure and logs the full traceback.
 
 ---
 
-# Logging
+# 6. Logging and Observability
 
-File:
+Logger:
 
 ```text
 src/utils/logger.py
 ```
 
-Features:
+Current features:
 
-* Step-level logging
-* Runtime tracking
-* Exception tracking
-* Pipeline monitoring
+- Pipeline start and completion
+- Step-level start and completion
+- Per-step runtime
+- Total runtime
+- Failure location
+- Exception details
+- Full traceback
+
+A successful run on 12 June 2026 completed all 11 steps in:
+
+```text
+61.66 seconds
+```
 
 ---
 
-# Database
+# 7. Database Layer
 
-PostgreSQL Version:
+PostgreSQL version:
 
 ```text
 PostgreSQL 17
 ```
 
-Core Tables:
+Core tables:
 
 ```sql
 macro_indicators
-market_prices
+openbb_market_data
 stock_quotes
 data_quality_results
 ```
 
+| Table | Strategy |
+|---|---|
+| `macro_indicators` | UPSERT |
+| `openbb_market_data` | UPSERT |
+| `stock_quotes` | UPSERT |
+| `data_quality_results` | Append-only |
+
 ---
 
-# Future Improvements
+# 8. OpenBB Data Lineage
 
-* Apache Airflow orchestration
-* Docker containerisation
-* Incremental extraction
-* Cloud deployment
-* Automated monitoring dashboard
-* Data warehouse modelling
-* CI/CD integration
+```text
+OpenBB
+  │
+  └── yfinance provider
+        │
+        ▼
+openbb_market_data.csv
+        │
+        ▼
+transform_openbb_market.py
+        │
+        ▼
+openbb_market_data_clean.csv
+        │
+        ├── data_checks.py
+        │     └── data_quality_results.csv
+        │
+        ▼
+load_openbb_market_to_postgres.py
+        │
+        ▼
+PostgreSQL: openbb_market_data
+```
+
+Provider, extraction, transformation, and load timestamps support traceability.
+
+---
+
+# 9. Error-Handling Strategy
+
+- Missing input files raise explicit errors.
+- Missing required columns stop transformation or loading.
+- Individual OpenBB symbol failures are collected without immediately stopping the full extraction batch.
+- The pipeline stops when a critical orchestration step raises an exception.
+- Quality warnings do not stop valid data from loading.
+- PostgreSQL transactions are handled through SQLAlchemy context managers.
+
+---
+
+# 10. Planned Improvements
+
+- Lightweight Streamlit pipeline-monitoring dashboard
+- Incremental extraction based on the latest stored date
+- Pipeline-run metadata table
+- Docker containerisation
+- Scheduled execution
+- Cloud deployment
+- CI/CD checks
+- Automated database health monitoring
+- Optional Apache Airflow orchestration

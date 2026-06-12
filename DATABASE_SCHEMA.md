@@ -2,46 +2,43 @@
 
 ## Overview
 
-This document describes the PostgreSQL database schema used in the Automated Data Pipeline project.
+This document describes the PostgreSQL schema used by the Automated Data Pipeline.
 
-The database stores cleaned and structured data from:
+The database stores:
 
-* FRED macroeconomic indicators
-* Yahoo Finance market prices
-* Sina Finance China stock quotes
-* Automated data quality checks
+- FRED macroeconomic indicators
+- OpenBB financial market data
+- Sina Finance China stock quotes
+- Historical data-quality results
 
-Core tables:
+Current core tables:
 
 ```sql
 macro_indicators
-market_prices
+openbb_market_data
 stock_quotes
 data_quality_results
 ```
 
 ---
 
-# 1. macro_indicators
+# 1. `macro_indicators`
 
 ## Purpose
 
-Stores macroeconomic time series extracted from FRED.
+Stores cleaned macroeconomic time series extracted from FRED.
 
-Examples:
+Current indicators include unemployment, CPI, and the federal funds rate.
 
-* Unemployment rate
-* Consumer price index
-* Federal funds rate
-
-## Suggested Schema
+## Logical Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS macro_indicators (
     id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    country VARCHAR(100),
     indicator_code VARCHAR(50) NOT NULL,
     indicator_name VARCHAR(255),
-    date DATE NOT NULL,
     value NUMERIC(20, 6),
     source VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -53,108 +50,126 @@ CREATE TABLE IF NOT EXISTS macro_indicators (
 
 ## Key Fields
 
-| Column         | Description                   |
-| -------------- | ----------------------------- |
-| id             | Internal primary key          |
-| indicator_code | FRED series code              |
-| indicator_name | Human-readable indicator name |
-| date           | Observation date              |
-| value          | Indicator value               |
-| source         | Data source                   |
-| created_at     | Record creation timestamp     |
+| Column | Description |
+|---|---|
+| `id` | Internal primary key |
+| `date` | Observation date |
+| `country` | Country associated with the series |
+| `indicator_code` | FRED series identifier |
+| `indicator_name` | Human-readable indicator name |
+| `value` | Observation value |
+| `source` | Original data source |
+| `created_at` | Database insertion timestamp |
 
 ## Duplicate Handling
-
-The loader uses UPSERT logic based on:
 
 ```sql
 UNIQUE (indicator_code, date)
 ```
 
-This prevents duplicate observations for the same macroeconomic indicator and date.
+Existing records are updated and new observations are inserted.
 
 ---
 
-# 2. market_prices
+# 2. `openbb_market_data`
 
 ## Purpose
 
-Stores financial market price data extracted from Yahoo Finance.
+Stores transformed financial market data extracted through OpenBB. The current implementation uses the Yahoo Finance provider for indices, Treasury-yield indices, the US Dollar Index, and equity-index futures.
 
-Examples:
-
-* SPY
-* QQQ
-* GLD
-* Crude oil futures
-* Treasury yields
-* Dollar index
-* Index futures
-
-## Suggested Schema
+## Current Schema
 
 ```sql
-CREATE TABLE IF NOT EXISTS market_prices (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(50) NOT NULL,
-    asset_name VARCHAR(255),
-    asset_type VARCHAR(100),
+CREATE TABLE IF NOT EXISTS openbb_market_data (
+    market_id BIGSERIAL PRIMARY KEY,
     date DATE NOT NULL,
+    symbol VARCHAR(30) NOT NULL,
+    asset_name VARCHAR(150) NOT NULL,
+    asset_type VARCHAR(50) NOT NULL,
 
-    open NUMERIC(20, 6),
-    high NUMERIC(20, 6),
-    low NUMERIC(20, 6),
-    close NUMERIC(20, 6),
-    adjusted_close NUMERIC(20, 6),
-    volume BIGINT,
+    open NUMERIC(20, 8),
+    high NUMERIC(20, 8),
+    low NUMERIC(20, 8),
+    close NUMERIC(20, 8) NOT NULL,
+    volume NUMERIC(24, 4),
 
-    source VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    provider VARCHAR(50) NOT NULL,
+    extracted_at TIMESTAMP,
+    transformed_at TIMESTAMP,
 
-    CONSTRAINT unique_market_symbol_date
+    ohlc_valid BOOLEAN,
+    daily_return DOUBLE PRECISION,
+    log_return DOUBLE PRECISION,
+    intraday_return DOUBLE PRECISION,
+    daily_range_pct DOUBLE PRECISION,
+
+    loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_openbb_market_symbol_date
         UNIQUE (symbol, date)
 );
 ```
 
 ## Key Fields
 
-| Column         | Description                      |
-| -------------- | -------------------------------- |
-| id             | Internal primary key             |
-| symbol         | Market ticker symbol             |
-| asset_name     | Human-readable asset name        |
-| asset_type     | ETF, futures, index, yield, etc. |
-| date           | Trading date                     |
-| open           | Opening price                    |
-| high           | Highest price                    |
-| low            | Lowest price                     |
-| close          | Closing price                    |
-| adjusted_close | Adjusted closing price           |
-| volume         | Trading volume                   |
-| source         | Data source                      |
-| created_at     | Record creation timestamp        |
+| Column | Description |
+|---|---|
+| `market_id` | Internal primary key |
+| `date` | Trading or observation date |
+| `symbol` | Provider ticker or market symbol |
+| `asset_name` | Human-readable asset name |
+| `asset_type` | Current values include `index` and `futures` |
+| `open` | Opening value |
+| `high` | Highest reported value |
+| `low` | Lowest reported value |
+| `close` | Closing or settlement value |
+| `volume` | Reported trading volume |
+| `provider` | OpenBB provider used for extraction |
+| `extracted_at` | Extraction timestamp |
+| `transformed_at` | Transformation timestamp |
+| `ohlc_valid` | Transformation-stage OHLC validation flag |
+| `daily_return` | Percentage change from the previous close |
+| `log_return` | Logarithmic return |
+| `intraday_return` | `(close - open) / open` |
+| `daily_range_pct` | `(high - low) / open` |
+| `loaded_at` | Latest database load timestamp |
 
-## Duplicate Handling
-
-The loader uses UPSERT logic based on:
+## Natural Key and UPSERT
 
 ```sql
 UNIQUE (symbol, date)
 ```
 
-This prevents duplicate market records for the same asset and date.
+The loader uses:
+
+```sql
+ON CONFLICT (symbol, date)
+DO UPDATE
+```
+
+Repeated pipeline runs therefore do not create duplicate symbol/date records.
+
+## Data-Quality Note
+
+Continuous futures and incomplete current-day provider records can occasionally contain OHLC inconsistencies. These rows are retained for traceability and recorded as warnings.
+
+Investigation output:
+
+```text
+data/processed/ohlc_inconsistency_investigation.csv
+```
 
 ---
 
-# 3. stock_quotes
+# 3. `stock_quotes`
 
 ## Purpose
 
-Stores real-time China stock quote data extracted from Sina Finance.
+Stores current A-share and Hong Kong share quote data extracted from Sina Finance.
 
-This table contains A-share and Hong Kong share quote data, including price, volume, bid/ask information, and calculated order imbalance indicators.
+The table supports current prices, price changes, volume, amount, available top-five bid and ask levels, bid/ask spread, aggregate bid/ask volume, and order imbalance.
 
-## Suggested Schema
+## Logical Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS stock_quotes (
@@ -209,7 +224,6 @@ CREATE TABLE IF NOT EXISTS stock_quotes (
     trade_datetime TIMESTAMP NOT NULL,
     source VARCHAR(100),
     extracted_at TIMESTAMP,
-
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT unique_stock_quote
@@ -217,50 +231,9 @@ CREATE TABLE IF NOT EXISTS stock_quotes (
 );
 ```
 
-## Key Fields
-
-| Column                   | Description                                          |
-| ------------------------ | ---------------------------------------------------- |
-| id                       | Internal primary key                                 |
-| symbol                   | Stock code, stored as text to preserve leading zeros |
-| sina_symbol              | Sina Finance symbol                                  |
-| name_en                  | English stock name                                   |
-| name_cn                  | Chinese stock name                                   |
-| market                   | A-share or HK-share                                  |
-| open                     | Opening price                                        |
-| previous_close           | Previous closing price                               |
-| current_price            | Latest price                                         |
-| high                     | Intraday high                                        |
-| low                      | Intraday low                                         |
-| price_change             | Price change                                         |
-| pct_change               | Percentage change                                    |
-| volume                   | Trading volume                                       |
-| amount                   | Trading amount                                       |
-| bid1_price to bid5_price | Top five bid prices                                  |
-| ask1_price to ask5_price | Top five ask prices                                  |
-| bid_volume_total         | Total bid volume from available levels               |
-| ask_volume_total         | Total ask volume from available levels               |
-| bid_ask_volume_diff      | Bid volume minus ask volume                          |
-| bid_ask_spread           | Best ask price minus best bid price                  |
-| order_imbalance          | Bid-ask imbalance indicator                          |
-| trade_datetime           | Quote timestamp                                      |
-| extracted_at             | Data extraction timestamp                            |
-
-## Duplicate Handling
-
-The loader uses UPSERT logic based on:
-
-```sql
-UNIQUE (symbol, market, trade_datetime)
-```
-
-This prevents duplicate quote records for the same stock, market, and quote timestamp.
-
 ## Important Design Notes
 
-Stock symbols are stored as `VARCHAR`, not numeric types.
-
-This is necessary because many stock codes contain leading zeros:
+Stock symbols are stored as `VARCHAR` to preserve leading zeros:
 
 ```text
 000001
@@ -270,61 +243,64 @@ This is necessary because many stock codes contain leading zeros:
 03690
 ```
 
-If stock symbols are stored as integers, the leading zeros will be lost.
+The `amount` field uses `NUMERIC(20, 2)` because trading amounts can exceed the range of smaller integer types.
 
-The `amount` column uses:
+## Duplicate Handling
 
 ```sql
-NUMERIC(20, 2)
+UNIQUE (symbol, market, trade_datetime)
 ```
-
-This is necessary because Hong Kong share trading amounts can exceed the range of smaller integer types.
 
 ---
 
-# 4. data_quality_results
+# 4. `data_quality_results`
 
 ## Purpose
 
-Stores the results of automated data quality checks.
+Stores historical results from automated quality checks.
 
-Unlike the core data tables, this table is designed to keep historical quality check results. Therefore, its row count increases every time the pipeline runs.
+Current checks cover:
 
-## Suggested Schema
+- Required-field missing values
+- Duplicate natural keys
+- Date freshness
+- Negative values
+- OHLC consistency
+- Return sanity
+- Expected OpenBB symbol coverage
+
+## Current Output Fields
+
+| Column | Description |
+|---|---|
+| `table_name` | Dataset being checked |
+| `check_name` | Name of the quality rule |
+| `check_result` | `PASS`, `WARNING`, or `FAIL` |
+| `failed_rows` | Number of affected values or rows |
+| `details` | Human-readable result details |
+| `check_time` | Check execution timestamp |
+
+Representative schema:
 
 ```sql
 CREATE TABLE IF NOT EXISTS data_quality_results (
-    id SERIAL PRIMARY KEY,
-    check_name VARCHAR(255) NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
     table_name VARCHAR(255),
-    check_status VARCHAR(50),
-    check_result TEXT,
-    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    check_name VARCHAR(255) NOT NULL,
+    check_result VARCHAR(50) NOT NULL,
+    failed_rows INTEGER NOT NULL DEFAULT 0,
+    details TEXT,
+    check_time TIMESTAMP NOT NULL
 );
 ```
 
-## Key Fields
-
-| Column       | Description               |
-| ------------ | ------------------------- |
-| id           | Internal primary key      |
-| check_name   | Name of the quality check |
-| table_name   | Table being checked       |
-| check_status | PASS, WARNING, or FAIL    |
-| check_result | Detailed check result     |
-| checked_at   | Check execution timestamp |
-
-## Design Choice
-
-This table is append-only.
-
-Each pipeline run inserts a new batch of quality check results. This allows the project to track historical data quality performance over time.
+This table is append-only so each pipeline run preserves a historical quality snapshot.
 
 ---
 
 # Recommended Indexes
 
-## macro_indicators
+## `macro_indicators`
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_macro_indicator_code
@@ -334,17 +310,23 @@ CREATE INDEX IF NOT EXISTS idx_macro_date
 ON macro_indicators (date);
 ```
 
-## market_prices
+## `openbb_market_data`
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_market_symbol
-ON market_prices (symbol);
+CREATE INDEX IF NOT EXISTS idx_openbb_market_date
+ON openbb_market_data (date);
 
-CREATE INDEX IF NOT EXISTS idx_market_date
-ON market_prices (date);
+CREATE INDEX IF NOT EXISTS idx_openbb_market_symbol
+ON openbb_market_data (symbol);
+
+CREATE INDEX IF NOT EXISTS idx_openbb_market_asset_type
+ON openbb_market_data (asset_type);
+
+CREATE INDEX IF NOT EXISTS idx_openbb_market_provider
+ON openbb_market_data (provider);
 ```
 
-## stock_quotes
+## `stock_quotes`
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_stock_symbol
@@ -357,54 +339,45 @@ CREATE INDEX IF NOT EXISTS idx_stock_trade_datetime
 ON stock_quotes (trade_datetime);
 ```
 
-## data_quality_results
+## `data_quality_results`
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_quality_checked_at
-ON data_quality_results (checked_at);
+CREATE INDEX IF NOT EXISTS idx_quality_check_time
+ON data_quality_results (check_time);
 
 CREATE INDEX IF NOT EXISTS idx_quality_table_name
 ON data_quality_results (table_name);
+
+CREATE INDEX IF NOT EXISTS idx_quality_result
+ON data_quality_results (check_result);
+```
+
+---
+
+# Data Loading Strategy
+
+## UPSERT Tables
+
+```text
+macro_indicators
+openbb_market_data
+stock_quotes
+```
+
+## Append-Only Table
+
+```text
+data_quality_results
 ```
 
 ---
 
 # Database Design Principles
 
-This database schema follows several practical data engineering principles:
-
-1. Use `VARCHAR` for identifiers such as stock symbols.
-2. Use `NUMERIC` for financial values to avoid floating-point precision issues.
-3. Use `BIGINT` for large volume fields.
-4. Use unique constraints to support UPSERT operations.
-5. Preserve historical data quality records.
-6. Separate macroeconomic data, market prices, stock quotes, and quality checks into different tables.
-7. Use timestamps to support auditability and monitoring.
-
----
-
-# Current Data Loading Strategy
-
-The pipeline uses two loading patterns:
-
-## Core Data Tables
-
-The following tables use UPSERT logic:
-
-```text
-macro_indicators
-market_prices
-stock_quotes
-```
-
-Existing records are updated, and new records are inserted.
-
-## Quality Results Table
-
-The following table uses append-only logic:
-
-```text
-data_quality_results
-```
-
-Each pipeline run adds a new set of quality check records.
+1. Use text types for identifiers and symbols.
+2. Use `NUMERIC` for stored financial values requiring controlled precision.
+3. Use unique natural keys to support idempotent UPSERT operations.
+4. Preserve provider and ETL timestamps for lineage and auditability.
+5. Separate macroeconomic series, market history, quote snapshots, and quality results.
+6. Retain upstream anomalies and record them through explicit quality warnings.
+7. Add indexes for common date, symbol, provider, market, and quality queries.

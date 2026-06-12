@@ -2,203 +2,185 @@
 
 ## Project Overview
 
-Automated Data Pipeline is an end-to-end ETL (Extract, Transform, Load) project built with Python and PostgreSQL. The pipeline automatically collects macroeconomic indicators, financial market data, and China stock market data from multiple external sources, performs data transformation and quality validation, and loads the cleaned data into a PostgreSQL data warehouse.
+Automated Data Pipeline is an end-to-end financial data engineering project built with Python and PostgreSQL. It collects macroeconomic indicators, global market data, and China stock quote data from multiple external sources, standardises and validates the data, and loads the processed datasets into PostgreSQL.
 
-The project demonstrates practical data engineering skills including API integration, web data extraction, data cleaning, automated workflows, database design, logging, and data quality monitoring.
+The project demonstrates:
+
+- Multi-source data ingestion
+- OpenBB provider integration
+- API and web-data extraction
+- Data transformation and financial feature engineering
+- Automated data quality monitoring
+- PostgreSQL UPSERT loading
+- Structured logging and runtime tracking
+- Modular ETL orchestration
 
 ---
 
-## Project Architecture
+## System Architecture
 
 ```text
-                 ┌───────────────┐
-                 │     FRED      │
-                 └───────┬───────┘
-                         │
-                 ┌───────▼───────┐
-                 │   Yahoo API   │
-                 └───────┬───────┘
-                         │
-                 ┌───────▼───────┐
-                 │ Sina Finance  │
-                 └───────┬───────┘
-                         │
-                         ▼
-
-                EXTRACT LAYER
-                         │
-                         ▼
-
-               TRANSFORM LAYER
-                         │
-                         ▼
-
-            DATA QUALITY CHECKS
-                         │
-                         ▼
-
-                LOAD LAYER
-                         │
-                         ▼
-
-                  PostgreSQL
+FRED ───────────────┐
+                    │
+OpenBB              ├──> Extract ──> Transform ──> Data Quality ──> PostgreSQL
+└─ yfinance provider│
+                    │
+Sina Finance ───────┘
+                                      │
+                                      └──> Logging and Monitoring
 ```
 
 ---
 
 ## Data Sources
 
-### Macroeconomic Indicators (FRED)
+### FRED Macroeconomic Indicators
 
-* UNRATE (Unemployment Rate)
-* CPIAUCSL (Consumer Price Index)
-* FEDFUNDS (Federal Funds Rate)
+Current series:
 
-Source:
-https://fred.stlouisfed.org/
+- `UNRATE` — Unemployment Rate
+- `CPIAUCSL` — Consumer Price Index for All Urban Consumers
+- `FEDFUNDS` — Federal Funds Effective Rate
 
----
+The current extraction module uses `fredapi`.
 
-### Financial Market Data (Yahoo Finance)
+### OpenBB Financial Market Data
 
-* SPY (S&P 500 ETF)
-* QQQ (NASDAQ ETF)
-* GLD (Gold ETF)
-* CL=F (Crude Oil Futures)
-* DX-Y.NYB (US Dollar Index)
-* ^TNX (10-Year Treasury Yield)
-* ^TYX (30-Year Treasury Yield)
-* YM=F (Dow Futures)
-* ES=F (S&P Futures)
+OpenBB is used as the unified market-data interface, with Yahoo Finance as the current provider.
 
-Source:
-https://finance.yahoo.com/
+| Symbol | Asset |
+|---|---|
+| `^GSPC` | S&P 500 |
+| `^DJI` | Dow Jones Industrial Average |
+| `^IXIC` | Nasdaq Composite |
+| `^TNX` | US 10-Year Treasury Yield |
+| `^TYX` | US 30-Year Treasury Yield |
+| `DX-Y.NYB` | US Dollar Index |
+| `ES=F` | S&P 500 Futures |
+| `YM=F` | Dow Jones Futures |
 
----
+OpenBB provides a consistent interface for index and futures extraction while preserving provider metadata for traceability.
 
-### China Stock Market Data (Sina Finance)
+### Sina Finance China Stock Quotes
 
-A-share Examples:
+A-share examples:
 
-* Ping An Bank
-* China Merchants Bank
-* Kweichow Moutai
-* CATL
-* BYD
-* SMIC
+- Ping An Bank
+- China Merchants Bank
+- Kweichow Moutai
+- CATL
+- BYD
+- SMIC
 
-Hong Kong Share Examples:
+Hong Kong share examples:
 
-* Tencent
-* Alibaba
-* Meituan
-
-Source:
-https://finance.sina.com.cn/
+- Tencent
+- Alibaba
+- Meituan
 
 ---
 
 ## ETL Workflow
 
-### Step 1 – Extract
+### 1. Extract
 
-Extract data from:
+The pipeline extracts:
 
-* FRED API
-* Yahoo Finance API
-* Sina Finance
+- FRED macroeconomic series
+- OpenBB market data
+- Sina China stock quotes
 
-Output:
+Raw outputs are saved to:
 
 ```text
 data/raw/
 ```
 
----
+Key files:
 
-### Step 2 – Transform
+```text
+data/raw/fred_UNRATE.csv
+data/raw/fred_CPIAUCSL.csv
+data/raw/fred_FEDFUNDS.csv
+data/raw/openbb_market_data.csv
+data/raw/sina_stock_quotes_raw.csv
+```
 
-Perform:
+### 2. Transform
 
-* Data type conversion
-* Datetime standardization
-* Missing value handling
-* Symbol normalization
-* Feature calculation
-* Data cleaning
+Transformation tasks include:
 
-Output:
+- Date and timestamp standardisation
+- Numeric type conversion
+- Symbol normalisation
+- Missing-value handling
+- Duplicate removal
+- Return calculations
+- Intraday movement calculation
+- Daily range calculation
+- Bid/ask metric calculation
+- ETL metadata generation
+
+The OpenBB transformation creates:
+
+```text
+daily_return
+log_return
+intraday_return
+daily_range_pct
+ohlc_valid
+extracted_at
+transformed_at
+```
+
+Processed outputs are saved to:
 
 ```text
 data/processed/
 ```
 
----
+### 3. Data Quality Validation
 
-### Step 3 – Data Quality Validation
+Automated checks include:
 
-Automated checks:
+- Required-field missing values
+- Natural-key duplicates
+- Date freshness
+- Negative price and volume values
+- OHLC consistency
+- Extreme return detection
+- Expected symbol coverage
 
-* Row count validation
-* Null value checks
-* Duplicate checks
-* Data freshness checks
+Known upstream OHLC inconsistencies are recorded as warnings rather than silently removed.
 
-Output:
+Investigation output:
 
 ```text
-data_quality_results
+data/processed/ohlc_inconsistency_investigation.csv
 ```
 
----
+Quality results:
 
-### Step 4 – Load
+```text
+data/processed/data_quality_results.csv
+```
 
-Load cleaned data into PostgreSQL:
+### 4. PostgreSQL Load
 
-Tables:
+Current core tables:
 
-* macro_indicators
-* market_prices
-* stock_quotes
-* data_quality_results
+- `macro_indicators`
+- `openbb_market_data`
+- `stock_quotes`
+- `data_quality_results`
 
-PostgreSQL UPSERT logic prevents duplicate records using:
+Core datasets use PostgreSQL UPSERT logic:
 
 ```sql
 ON CONFLICT DO UPDATE
 ```
 
----
-
-## Technologies Used
-
-### Programming
-
-* Python 3.12
-
-### Data Processing
-
-* Pandas
-* NumPy
-
-### Data Collection
-
-* FredAPI
-* yfinance
-* requests
-
-### Database
-
-* PostgreSQL 17
-* SQLAlchemy
-* psycopg2
-
-### Development Tools
-
-* PyCharm
-* Git
-* GitHub
+The quality-results table is append-only so historical quality performance can be monitored over time.
 
 ---
 
@@ -206,7 +188,6 @@ ON CONFLICT DO UPDATE
 
 ```text
 Automated_Data_Pipeline/
-
 │
 ├── data/
 │   ├── raw/
@@ -215,15 +196,28 @@ Automated_Data_Pipeline/
 ├── logs/
 │
 ├── src/
-│
 │   ├── extract/
+│   │   ├── fred_extract.py
+│   │   ├── openbb_market_extract.py
+│   │   └── sina_stock_extract.py
 │   ├── transform/
+│   │   ├── macro_transform.py
+│   │   ├── transform_openbb_market.py
+│   │   └── china_stock_transform.py
 │   ├── quality/
+│   │   └── data_checks.py
 │   ├── load/
+│   │   ├── load_macro_to_postgres.py
+│   │   ├── load_openbb_market_to_postgres.py
+│   │   ├── load_china_stock_to_postgres.py
+│   │   └── load_quality_to_postgres.py
 │   └── utils/
+│       └── logger.py
 │
+├── DATABASE_SCHEMA.md
+├── PROJECT_ARCHITECTURE.md
 ├── main.py
-│
+├── requirements.txt
 └── README.md
 ```
 
@@ -231,47 +225,132 @@ Automated_Data_Pipeline/
 
 ## Pipeline Execution
 
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
 Run the complete pipeline:
 
 ```bash
 python main.py
 ```
 
-Pipeline Steps:
+Current execution sequence:
 
-1. Extract FRED data
-2. Extract market data
-3. Extract China stock data
-4. Transform macro data
-5. Transform market data
-6. Transform stock data
+1. Extract FRED macroeconomic data
+2. Extract financial market data through OpenBB
+3. Extract Sina China stock quote data
+4. Transform macroeconomic data
+5. Transform OpenBB financial market data
+6. Transform China stock quote data
 7. Run data quality checks
-8. Load macro data
-9. Load market data
-10. Load stock data
-11. Load quality results
+8. Load macroeconomic data into PostgreSQL
+9. Load OpenBB market data into PostgreSQL
+10. Load China stock quote data into PostgreSQL
+11. Load quality results into PostgreSQL
 
 ---
 
-## Sample Runtime
+## Structured Logging
+
+The orchestration layer records:
+
+- Pipeline start and completion
+- Step-level start and completion
+- Step runtime
+- Total runtime
+- Failed-step identification
+- Full exception traceback
+
+Logger module:
 
 ```text
-Total Runtime: ~126 seconds
+src/utils/logger.py
 ```
+
+---
+
+## Latest Sample Run
+
+A complete run on 12 June 2026 produced:
+
+| Dataset | Result |
+|---|---:|
+| FRED macro rows loaded | 591 |
+| OpenBB market rows loaded | 2,897 |
+| OpenBB symbols | 8 |
+| Sina stock quote rows loaded | 9 |
+| Quality checks stored | 10 |
+| Duplicate OpenBB symbol/date groups | 0 |
+| Total runtime | 61.66 seconds |
+
+All 11 steps completed successfully.
+
+The quality layer recorded:
+
+- 2 macro missing values as `WARNING`
+- 7 upstream OHLC inconsistencies as `WARNING`
+- No OpenBB duplicate, negative-value, freshness, return-sanity, or symbol-coverage failures
+
+---
+
+## Technologies Used
+
+### Programming and Processing
+
+- Python 3.12
+- pandas
+- NumPy
+
+### Data Collection
+
+- OpenBB
+- OpenBB yfinance provider
+- fredapi
+- requests
+
+### Database
+
+- PostgreSQL 17
+- SQLAlchemy
+- psycopg2
+
+### Engineering Tools
+
+- PyCharm
+- Git
+- GitHub
 
 ---
 
 ## Key Data Engineering Concepts Demonstrated
 
-* ETL Pipeline Design
-* Data Warehouse Loading
-* PostgreSQL Integration
-* Incremental Loading (UPSERT)
-* Data Quality Monitoring
-* Structured Logging
-* Automated Workflow Orchestration
-* API Integration
-* Financial Data Engineering
+- Modular ETL architecture
+- Multi-provider financial data ingestion
+- OpenBB integration
+- Data lineage and provider metadata
+- Financial feature engineering
+- Data quality monitoring
+- Exception investigation workflows
+- PostgreSQL schema design
+- Incremental loading with UPSERT
+- Structured logging
+- Runtime observability
+- Re-runnable workflows
+
+---
+
+## Planned Improvements
+
+- Lightweight Streamlit pipeline-monitoring dashboard
+- Incremental date-based extraction
+- Historical pipeline-run metadata table
+- Docker containerisation
+- Scheduled orchestration
+- CI/CD validation
+- Cloud-hosted PostgreSQL deployment
 
 ---
 
@@ -279,8 +358,7 @@ Total Runtime: ~126 seconds
 
 Vinci Lee
 
-Master of Applied Economics
-
+Master of Applied Economics  
 Bachelor of Statistics
 
 Data Analytics | Data Engineering | Applied Economics

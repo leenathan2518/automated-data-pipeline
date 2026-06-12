@@ -1,0 +1,12 @@
+step_number,total_steps,step_name,status,runtime_seconds
+1,11,Extract FRED macroeconomic data,PASS,31.47
+2,11,Extract financial market data through OpenBB,PASS,11.15
+3,11,Extract Sina China stock quote data,PASS,17.33
+4,11,Transform macroeconomic data,PASS,0.05
+5,11,Transform OpenBB financial market data,PASS,0.1
+6,11,Transform China stock quote data,PASS,0.04
+7,11,Run data quality checks,PASS,0.06
+8,11,Load macroeconomic data into PostgreSQL,PASS,0.45
+9,11,Load OpenBB financial market data into PostgreSQL,PASS,1.07
+10,11,Load China stock quote data into PostgreSQL,PASS,0.13
+11,11,Load quality results into PostgreSQL,PASS,0.09

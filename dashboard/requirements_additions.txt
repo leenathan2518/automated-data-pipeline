@@ -1,0 +1,4 @@
+Add to requirements.txt if missing:
+
+streamlit
+plotly
